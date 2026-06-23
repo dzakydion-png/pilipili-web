@@ -1,13 +1,515 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Get a free hosted Postgres database in seconds: `npx create-db`
-
 generator client {
-  provider = "prisma-client"
-  output   = "../app/generated/prisma"
+  provider = "prisma-client-js"
 }
 
 datasource db {
   provider = "postgresql"
+}
+
+enum UserRole {
+  CUSTOMER
+  ADMIN
+  FINANCE
+  SUPER_ADMIN
+}
+
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
+  DELETED
+}
+
+enum RequestStatus {
+  DRAFT
+  SUBMITTED
+  UNDER_REVIEW
+  QUOTED
+  CUSTOMER_REVISION_REQUESTED
+  ACCEPTED
+  REJECTED
+  EXPIRED
+  CANCELLED
+}
+
+enum QuoteStatus {
+  DRAFT
+  SENT
+  ACCEPTED
+  REJECTED
+  EXPIRED
+  SUPERSEDED
+}
+
+enum OrderStatus {
+  AWAITING_PAYMENT
+  PAYMENT_SUBMITTED
+  PAYMENT_VERIFIED
+  PURCHASING
+  PURCHASED
+  SELLER_PROCESSING
+  INTERNATIONAL_SHIPPING
+  ARRIVED_AT_WAREHOUSE
+  CUSTOMS_PROCESSING
+  DOMESTIC_SHIPPING
+  DELIVERED
+  COMPLETED
+  PROBLEM
+  CANCELLED
+  REFUNDED
+}
+
+enum PaymentStatus {
+  PENDING
+  SUBMITTED
+  VERIFIED
+  REJECTED
+  REFUNDED
+}
+
+enum PaymentMethod {
+  BANK_TRANSFER
+  E_WALLET
+  PAYMENT_GATEWAY
+  CASH
+  OTHER
+}
+
+enum ShipmentType {
+  INTERNATIONAL
+  DOMESTIC
+}
+
+enum ShipmentStatus {
+  PENDING
+  IN_TRANSIT
+  ARRIVED
+  CUSTOMS
+  DELIVERED
+  FAILED
+  RETURNED
+}
+
+enum CostAdjustmentType {
+  CUSTOMS_DIFFERENCE
+  SHIPPING_DIFFERENCE
+  PRICE_CHANGE
+  REFUND
+  ADDITIONAL_HANDLING
+  OTHER
+}
+
+enum AdjustmentDirection {
+  CUSTOMER_CHARGE
+  CUSTOMER_CREDIT
+}
+
+enum EntityType {
+  PURCHASE_REQUEST
+  QUOTE
+  ORDER
+  PAYMENT
+  SHIPMENT
+  USER
+  MARKETPLACE
+}
+
+enum TimelineVisibility {
+  CUSTOMER_VISIBLE
+  INTERNAL_ONLY
+}
+
+enum AttachmentType {
+  PAYMENT_PROOF
+  MARKETPLACE_INVOICE
+  PRODUCT_PHOTO
+  CUSTOMS_DOCUMENT
+  SHIPPING_LABEL
+  OTHER
+}
+
+enum FeeType {
+  SERVICE_FEE
+  EXCHANGE_RATE_MARKUP
+  HANDLING_FEE
+  INSURANCE_FEE
+  OTHER
+}
+
+model User {
+  id             String     @id @default(cuid())
+  name           String?
+  email          String     @unique
+  emailVerified  DateTime?  @map("email_verified_at")
+  image          String?
+  phone          String?
+  whatsappNumber String?
+  passwordHash   String?
+  role           UserRole   @default(CUSTOMER)
+  status         UserStatus @default(ACTIVE)
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+
+  accounts         Account[]
+  sessions         Session[]
+  addresses        Address[]
+  purchaseRequests PurchaseRequest[] @relation("CustomerPurchaseRequests")
+  createdQuotes    Quote[]           @relation("AdminCreatedQuotes")
+  orders           Order[]           @relation("CustomerOrders")
+  payments         Payment[]         @relation("CustomerPayments")
+  verifiedPayments Payment[]         @relation("AdminVerifiedPayments")
+  costAdjustments  CostAdjustment[]  @relation("AdminCreatedCostAdjustments")
+  timelineEvents   TimelineEvent[]   @relation("UserTimelineEvents")
+  adminNotes       AdminNote[]       @relation("AdminNotes")
+  attachments      Attachment[]      @relation("UploadedAttachments")
+  auditLogs        AuditLog[]        @relation("AdminAuditLogs")
+  feeSettings      FeeSetting[]      @relation("AdminFeeSettings")
+
+  @@index([role])
+  @@index([status])
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@index([userId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+model Address {
+  id            String   @id @default(cuid())
+  userId        String
+  label         String
+  recipientName String
+  phone         String
+  province      String
+  city          String
+  district      String
+  postalCode    String
+  addressLine   String   @db.Text
+  notes         String?  @db.Text
+  isDefault     Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  user             User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  purchaseRequests PurchaseRequest[] @relation("RequestDestinationAddress")
+
+  @@index([userId])
+}
+
+model Marketplace {
+  id           String   @id @default(cuid())
+  name         String
+  slug         String   @unique
+  baseCountry  String
+  baseCurrency String
+  isActive     Boolean  @default(true)
+  notes        String?  @db.Text
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  purchaseRequests PurchaseRequest[]
+  feeSettings      FeeSetting[]
+
+  @@index([isActive])
+}
+
+model PurchaseRequest {
+  id                   String        @id @default(cuid())
+  requestNumber        String        @unique
+  customerId           String
+  marketplaceId        String
+  status               RequestStatus @default(SUBMITTED)
+  productUrl           String        @db.Text
+  productName          String?
+  productImageUrl      String?       @db.Text
+  variant              String?
+  quantity             Int           @default(1)
+  customerNotes        String?       @db.Text
+  adminNotes           String?       @db.Text
+  destinationAddressId String?
+  submittedAt          DateTime?
+  expiresAt            DateTime?
+  createdAt            DateTime      @default(now())
+  updatedAt            DateTime      @updatedAt
+
+  customer           User        @relation("CustomerPurchaseRequests", fields: [customerId], references: [id], onDelete: Restrict)
+  marketplace        Marketplace @relation(fields: [marketplaceId], references: [id], onDelete: Restrict)
+  destinationAddress Address?    @relation("RequestDestinationAddress", fields: [destinationAddressId], references: [id], onDelete: SetNull)
+  quotes             Quote[]
+  order              Order?
+
+  @@index([customerId])
+  @@index([marketplaceId])
+  @@index([destinationAddressId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model Quote {
+  id                        String      @id @default(cuid())
+  quoteNumber               String      @unique
+  purchaseRequestId         String
+  status                    QuoteStatus @default(DRAFT)
+  sourceCurrency            String
+  exchangeRateToIdr         Decimal     @db.Decimal(18, 6)
+  itemSubtotalSource        Decimal     @db.Decimal(14, 2)
+  marketplaceShippingSource Decimal     @default(0) @db.Decimal(14, 2)
+  internationalShippingIdr  Decimal     @default(0) @db.Decimal(14, 2)
+  customsEstimateIdr        Decimal     @default(0) @db.Decimal(14, 2)
+  domesticShippingIdr       Decimal     @default(0) @db.Decimal(14, 2)
+  serviceFeeIdr             Decimal     @default(0) @db.Decimal(14, 2)
+  insuranceFeeIdr           Decimal     @default(0) @db.Decimal(14, 2)
+  otherFeeIdr               Decimal     @default(0) @db.Decimal(14, 2)
+  discountIdr               Decimal     @default(0) @db.Decimal(14, 2)
+  totalEstimateIdr          Decimal     @db.Decimal(14, 2)
+  validUntil                DateTime
+  customerAcceptedAt        DateTime?
+  customerRejectedAt        DateTime?
+  customerRejectionReason   String?     @db.Text
+  createdByAdminId          String
+  createdAt                 DateTime    @default(now())
+  updatedAt                 DateTime    @updatedAt
+
+  purchaseRequest PurchaseRequest @relation(fields: [purchaseRequestId], references: [id], onDelete: Cascade)
+  createdByAdmin  User            @relation("AdminCreatedQuotes", fields: [createdByAdminId], references: [id], onDelete: Restrict)
+  order           Order?
+
+  @@index([purchaseRequestId])
+  @@index([status])
+  @@index([createdByAdminId])
+  @@index([validUntil])
+}
+
+model Order {
+  id                              String      @id @default(cuid())
+  orderNumber                     String      @unique
+  purchaseRequestId               String      @unique
+  acceptedQuoteId                 String      @unique
+  customerId                      String
+  status                          OrderStatus @default(AWAITING_PAYMENT)
+  totalEstimateIdr                Decimal     @db.Decimal(14, 2)
+  totalActualIdr                  Decimal?    @db.Decimal(14, 2)
+  amountPaidIdr                   Decimal     @default(0) @db.Decimal(14, 2)
+  outstandingAmountIdr            Decimal     @default(0) @db.Decimal(14, 2)
+  marketplaceOrderNumber          String?
+  sellerName                      String?
+  actualItemSubtotalSource        Decimal?    @db.Decimal(14, 2)
+  actualMarketplaceShippingSource Decimal?    @db.Decimal(14, 2)
+  actualExchangeRateToIdr         Decimal?    @db.Decimal(18, 6)
+  purchasedAt                     DateTime?
+  estimatedArrivalAt              DateTime?
+  completedAt                     DateTime?
+  cancelledAt                     DateTime?
+  createdAt                       DateTime    @default(now())
+  updatedAt                       DateTime    @updatedAt
+
+  purchaseRequest PurchaseRequest  @relation(fields: [purchaseRequestId], references: [id], onDelete: Restrict)
+  acceptedQuote   Quote            @relation(fields: [acceptedQuoteId], references: [id], onDelete: Restrict)
+  customer        User             @relation("CustomerOrders", fields: [customerId], references: [id], onDelete: Restrict)
+  payments        Payment[]
+  shipments       Shipment[]
+  costAdjustments CostAdjustment[]
+
+  @@index([customerId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model Payment {
+  id                String        @id @default(cuid())
+  paymentNumber     String        @unique
+  orderId           String
+  customerId        String
+  status            PaymentStatus @default(PENDING)
+  method            PaymentMethod @default(BANK_TRANSFER)
+  amountIdr         Decimal       @db.Decimal(14, 2)
+  paymentProofUrl   String?       @db.Text
+  paidAt            DateTime?
+  submittedAt       DateTime?
+  verifiedAt        DateTime?
+  verifiedByAdminId String?
+  rejectionReason   String?       @db.Text
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+
+  order           Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  customer        User  @relation("CustomerPayments", fields: [customerId], references: [id], onDelete: Restrict)
+  verifiedByAdmin User? @relation("AdminVerifiedPayments", fields: [verifiedByAdminId], references: [id], onDelete: SetNull)
+
+  @@index([orderId])
+  @@index([customerId])
+  @@index([status])
+  @@index([verifiedByAdminId])
+}
+
+model Shipment {
+  id               String         @id @default(cuid())
+  orderId          String
+  type             ShipmentType
+  status           ShipmentStatus @default(PENDING)
+  carrierName      String?
+  trackingNumber   String?
+  trackingUrl      String?        @db.Text
+  origin           String?
+  destination      String?
+  estimatedCostIdr Decimal?       @db.Decimal(14, 2)
+  actualCostIdr    Decimal?       @db.Decimal(14, 2)
+  shippedAt        DateTime?
+  deliveredAt      DateTime?
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId])
+  @@index([status])
+  @@index([trackingNumber])
+}
+
+model CostAdjustment {
+  id               String              @id @default(cuid())
+  orderId          String
+  type             CostAdjustmentType
+  description      String              @db.Text
+  amountIdr        Decimal             @db.Decimal(14, 2)
+  direction        AdjustmentDirection
+  createdByAdminId String
+  createdAt        DateTime            @default(now())
+
+  order          Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  createdByAdmin User  @relation("AdminCreatedCostAdjustments", fields: [createdByAdminId], references: [id], onDelete: Restrict)
+
+  @@index([orderId])
+  @@index([type])
+  @@index([createdByAdminId])
+}
+
+model TimelineEvent {
+  id          String             @id @default(cuid())
+  entityType  EntityType
+  entityId    String
+  actorUserId String?
+  eventType   String
+  title       String
+  description String?            @db.Text
+  visibility  TimelineVisibility @default(CUSTOMER_VISIBLE)
+  metadata    Json?
+  createdAt   DateTime           @default(now())
+
+  actorUser User? @relation("UserTimelineEvents", fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([entityType, entityId])
+  @@index([actorUserId])
+  @@index([eventType])
+  @@index([visibility])
+  @@index([createdAt])
+}
+
+model AdminNote {
+  id         String     @id @default(cuid())
+  entityType EntityType
+  entityId   String
+  adminId    String
+  note       String     @db.Text
+  createdAt  DateTime   @default(now())
+  updatedAt  DateTime   @updatedAt
+
+  admin User @relation("AdminNotes", fields: [adminId], references: [id], onDelete: Restrict)
+
+  @@index([entityType, entityId])
+  @@index([adminId])
+}
+
+model Attachment {
+  id               String         @id @default(cuid())
+  entityType       EntityType
+  entityId         String
+  uploadedByUserId String?
+  type             AttachmentType
+  fileName         String
+  fileUrl          String         @db.Text
+  mimeType         String
+  fileSize         Int
+  createdAt        DateTime       @default(now())
+
+  uploadedByUser User? @relation("UploadedAttachments", fields: [uploadedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([entityType, entityId])
+  @@index([uploadedByUserId])
+  @@index([type])
+}
+
+model AuditLog {
+  id          String     @id @default(cuid())
+  actorUserId String?
+  action      String
+  entityType  EntityType
+  entityId    String
+  beforeData  Json?
+  afterData   Json?
+  ipAddress   String?
+  userAgent   String?    @db.Text
+  createdAt   DateTime   @default(now())
+
+  actorUser User? @relation("AdminAuditLogs", fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([actorUserId])
+  @@index([entityType, entityId])
+  @@index([action])
+  @@index([createdAt])
+}
+
+model FeeSetting {
+  id            String   @id @default(cuid())
+  marketplaceId String?
+  type          FeeType
+  name          String
+  value         Decimal  @db.Decimal(14, 4)
+  currency      String   @default("IDR")
+  isPercentage  Boolean  @default(false)
+  isActive      Boolean  @default(true)
+  notes         String?  @db.Text
+  createdById   String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  marketplace Marketplace? @relation(fields: [marketplaceId], references: [id], onDelete: Cascade)
+  createdBy   User?        @relation("AdminFeeSettings", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([marketplaceId])
+  @@index([type])
+  @@index([isActive])
 }
